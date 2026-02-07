@@ -1,0 +1,145 @@
+import streamlit as st
+import pandas as pd
+import matplotlib.pyplot as plt
+import numpy as np
+
+# ────────────────────────────────────────────────
+# CONFIG
+# ────────────────────────────────────────────────
+st.set_page_config(page_title="CARE Reform Comparison", layout="wide")
+
+st.title("CARE Funding Reform Comparison")
+st.markdown("Original CARE model vs. separating fixed readiness costs (funded centrally).")
+
+# ────────────────────────────────────────────────
+# SIDEBAR CONTROLS
+# ────────────────────────────────────────────────
+st.sidebar.header("Adjust Parameters")
+
+utilization = st.sidebar.slider("Utilization (% of benchmark)", 50, 150, 70, step=5) / 100.0
+separation = st.sidebar.slider("Percent of Fixed Readiness Costs Separated (%)", 0, 100, 80, step=5) / 100.0
+staff_increase = st.sidebar.slider("Staffing Increase (%)", 0, 30, 0, step=5) / 100.0
+max_leakage = st.sidebar.slider("Max Leakage at 0% Utilization ($M)", 0.0, 60.0, 30.0, step=5.0)
+
+# ────────────────────────────────────────────────
+# BASELINE CONSTANTS (from your manuscript)
+# ────────────────────────────────────────────────
+BASE_GROSS_CARE = 182.1
+BASE_MILPAY     = 104.7
+BASE_FIXED      = 178.6
+REIMB           = 0.0
+
+# ────────────────────────────────────────────────
+# CALCULATIONS
+# ────────────────────────────────────────────────
+gross = BASE_GROSS_CARE * utilization * (1 + 0.6 * staff_increase)
+milpay = BASE_MILPAY * (1 + staff_increase)
+net_earned = gross - milpay + REIMB
+
+leakage = max_leakage * max(0, 1 - utilization)
+
+# Original (pre-reform)
+fixed_original = BASE_FIXED * (1 + staff_increase)
+total_cost_original = fixed_original + leakage
+deficit_original = net_earned - total_cost_original
+
+# Post-reform (separated)
+fixed_remaining = BASE_FIXED * (1 - separation) * (1 + staff_increase)
+total_cost_reform = fixed_remaining + leakage
+deficit_reform = net_earned - total_cost_reform
+
+# ────────────────────────────────────────────────
+# STATEMENT OF OPERATIONS TABLE
+# ────────────────────────────────────────────────
+st.subheader("Statement of Operations ($ Millions)")
+
+table_data = {
+    "Line Item": [
+        "Gross CARE Value",
+        "− Military Pay Offset",
+        "+ Reimbursable Revenue",
+        "= Net Earned Funding",
+        "Fixed Readiness Costs (in CARE)",
+        "Variable Leakage Costs",
+        "= Total Costs",
+        "= Net Operating Position"
+    ],
+    "Original CARE": [
+        f"{gross:,.1f}",
+        f"{milpay:,.1f}",
+        f"{REIMB:,.1f}",
+        f"{net_earned:,.1f}",
+        f"{fixed_original:,.1f}",
+        f"{leakage:,.1f}",
+        f"{total_cost_original:,.1f}",
+        f"{deficit_original:,.1f}"
+    ],
+    "After Separation": [
+        f"{gross:,.1f}",
+        f"{milpay:,.1f}",
+        f"{REIMB:,.1f}",
+        f"{net_earned:,.1f}",
+        f"{fixed_remaining:,.1f}",
+        f"{leakage:,.1f}",
+        f"{total_cost_reform:,.1f}",
+        f"{deficit_reform:,.1f}"
+    ]
+}
+
+df_table = pd.DataFrame(table_data)
+st.dataframe(df_table, use_container_width=True, hide_index=True)
+
+# Highlight net results
+col1, col2 = st.columns(2)
+with col1:
+    st.metric("Original Net Position", f"${deficit_original:,.1f}M",
+              delta_color="inverse" if deficit_original < 0 else "normal")
+with col2:
+    st.metric("Post-Reform Net Position", f"${deficit_reform:,.1f}M",
+              delta_color="normal" if deficit_reform >= 0 else "inverse")
+
+# ────────────────────────────────────────────────
+# SENSITIVITY CHART
+# ────────────────────────────────────────────────
+st.subheader("Net Position vs. Utilization")
+
+util_range = np.linspace(0.5, 1.5, 21)
+original_curve = []
+reform_curve = []
+
+for u in util_range:
+    g = BASE_GROSS_CARE * u * (1 + 0.6 * staff_increase)
+    m = BASE_MILPAY * (1 + staff_increase)
+    n = g - m + REIMB
+    l = max_leakage * max(0, 1 - u)
+    
+    # Original
+    f_orig = BASE_FIXED * (1 + staff_increase)
+    original_curve.append(n - (f_orig + l))
+    
+    # Reform
+    f_ref = BASE_FIXED * (1 - separation) * (1 + staff_increase)
+    reform_curve.append(n - (f_ref + l))
+
+fig, ax = plt.subplots(figsize=(10, 5))
+ax.plot(util_range * 100, original_curve, label="Original CARE", color="darkred", marker="o", linewidth=2)
+ax.plot(util_range * 100, reform_curve, label="After Separation", color="darkgreen", marker="o", linewidth=2)
+ax.axhline(0, color="gray", linestyle="--", linewidth=1)
+ax.set_xlabel("Utilization (% of Benchmark)")
+ax.set_ylabel("Net Position ($ Millions)")
+ax.set_title("Pre vs. Post Reform – Net Position Curve")
+ax.legend()
+ax.grid(True, alpha=0.3)
+st.pyplot(fig)
+
+# ────────────────────────────────────────────────
+# NOTES
+# ────────────────────────────────────────────────
+st.markdown("---")
+st.caption("""
+**Assumptions & Notes**  
+• Earned value grows sub-linearly with staffing (factor 0.6).  
+• Fixed costs increase linearly with staffing.  
+• Separation removes the chosen % of fixed readiness from CARE (funded centrally).  
+• Based on FY2026 large MTF baseline data – for illustrative purposes only.
+""")
